@@ -1,5 +1,5 @@
 import unittest
-from print_strength_engine import weakest_section
+from print_strength_engine import weakest_section, weakest_layer_candidate
 
 class Sections(unittest.TestCase):
     def test_neck_controls(self):
@@ -16,5 +16,12 @@ class Sections(unittest.TestCase):
         self.assertEqual(r['weakest_section']['failure_index'],1)
     def test_invalid(self):
         with self.assertRaises(ValueError): weakest_section([],1)
+    def test_layer_neck_candidate(self):
+        volumes=[20,20,20,3,20,20,20,20]
+        profile={'layers':[{'z_mm':i*.2,'volume_mm3':v} for i,v in enumerate(volumes)]}
+        result=weakest_layer_candidate(profile)
+        self.assertEqual(result['status'],'GEOMETRIC_CANDIDATE_ONLY')
+        self.assertAlmostEqual(result['weakest_section']['z_mm'],.6)
+        self.assertAlmostEqual(result['weakest_section']['material_area_proxy_mm2'],15)
 
 if __name__=='__main__': unittest.main()
