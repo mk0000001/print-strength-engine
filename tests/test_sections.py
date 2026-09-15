@@ -33,4 +33,29 @@ class Sections(unittest.TestCase):
         result=weakest_layer_candidate({'layers':rows})
         self.assertIsNone(result['weakest_section']['layer_number'])
 
+    def test_internal_necks_rank_ahead_of_tiny_terminal_tip(self):
+        values=[100.]*100
+        values[30:33]=[30.,20.,30.];values[65:68]=[45.,35.,45.]
+        values[85:]=[float(16-i) for i in range(15)]
+        profile={'layers':[{'z_mm':(i+1)*.2,'volume_mm3':v*.2,'layer_number':i+1} for i,v in enumerate(values)]}
+        result=weakest_layer_candidate(profile)
+        self.assertEqual(result['weakest_section']['layer_number'],32)
+        self.assertGreaterEqual(len(result['weak_candidates']),2)
+        self.assertTrue(all(c['layer_number']<85 for c in result['weak_candidates']))
+        self.assertEqual(result['weak_candidates'][0],result['weakest_section'])
+        self.assertEqual(len({c['region_id'] for c in result['weak_candidates']}),len(result['weak_candidates']))
+
+    def test_uniform_and_monotonic_tapers_do_not_invent_necks(self):
+        for values in ([100]*40,list(range(40,0,-1))):
+            result=weakest_layer_candidate({'layers':[{'z_mm':(i+1)*.2,'volume_mm3':v*.2,'layer_number':i+1} for i,v in enumerate(values)]})
+            self.assertEqual(result['weak_candidates'],[])
+            self.assertIsNone(result['weakest_section'])
+
+    def test_candidate_limit_and_separation(self):
+        values=[100.]*200
+        for i in range(15,180,20):values[i]=10.
+        result=weakest_layer_candidate({'layers':[{'z_mm':(i+1)*.2,'volume_mm3':v*.2,'layer_number':i+1} for i,v in enumerate(values)]})
+        self.assertEqual(len(result['weak_candidates']),6)
+        self.assertEqual([c['rank'] for c in result['weak_candidates']],list(range(1,7)))
+
 if __name__=='__main__': unittest.main()
