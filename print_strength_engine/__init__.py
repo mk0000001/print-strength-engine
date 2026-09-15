@@ -24,7 +24,7 @@ def weakest_layer_candidate(profile, *, exclude_end_layers=2):
         height=heights[index-1] if index>0 and 0<heights[index-1]<=nominal_height*2 else nominal_height
         volume=float(row['volume_mm3'])
         if not isfinite(volume) or volume<=0:continue
-        candidates.append({'z_mm':float(row['z_mm']),'material_area_proxy_mm2':volume/height,
+        candidates.append({'z_mm':float(row['z_mm']),'layer_number':row.get('layer_number'),'material_area_proxy_mm2':volume/height,
                            'observed_model_volume_mm3':volume,'layer_height_for_proxy_mm':height})
     if not candidates:return {'status':'INSUFFICIENT_PROFILE','reason':'NO_VALID_INTERNAL_LAYER'}
     weakest=min(candidates,key=lambda row:row['material_area_proxy_mm2'])
