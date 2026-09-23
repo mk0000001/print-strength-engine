@@ -1,4 +1,16 @@
 from math import isfinite
+from statistics import median
+
+
+def weakest_layer_candidate(profile, *, exclude_end_layers=2):
+    """Rank interior Z interfaces using observed model extrusion volume.
+
+    The volume/height ratio is a material-area proxy. It does not resolve
+    perimeter topology, void connectivity, stress concentration or load path.
+    No failure load or MPa strength may be inferred from this function alone.
+    """
+    from .candidates import rank_layers
+    return rank_layers(profile,exclude_end_layers)
 
 def weakest_section(sections, force_n, moment_nmm=0):
     """First local limit under uniform axial force and a supplied moment.
