@@ -1,22 +1,16 @@
-"""Deposition-process knockdowns read from the parsed G-code settings.
-
-Speed and layer height change how long each weld line stays hot enough to heal,
-so they scale the deposited material stress itself. Infill density, pattern and
-wall count change the load-bearing section instead; those belong to capacity.py
-and must never be applied here as well.
-"""
+"""Preserve process context without inventing a calibrated strength transfer."""
 from math import isfinite
+from copy import deepcopy
+import re
+from .evidence import literature_comparisons
 
-VERSION='GCODE_PROCESS_KNOCKDOWN_V1'
-# 986-file corpus: outer-wall setting median 200 mm/s (p75 250), measured time-weighted
-# p50 median 146 mm/s (p90 225). The derate is relative to that fleet norm, so it only
-# bites on prints faster than the machines normally run.
-REFERENCE_SPEED_MM_S=200.
-REFERENCE_LAYER_MM=.2
+VERSION='GCODE_PROCESS_EVIDENCE_V2'
 AXES=('X','Y','Z')
 
 
 def number(value,low,high):
+    if isinstance(value,(list,tuple)):
+        value=value[0] if value else None
     try:value=float(str(value).split(',')[0].strip().rstrip('%'))
     except (TypeError,ValueError):return None
     return value if isfinite(value) and low<=value<=high else None
@@ -30,6 +24,12 @@ def settings(analysis):
     speeds=metrics.get('commanded_speed_mm_s') or {}
     def first(*keys):
         return next((config[k] for k in keys if config.get(k) not in (None,'')),None)
+    detected=analysis.get('detected_materials')
+    family_value=detected if detected else first('filament_type','material_family')
+    family_values=family_value if isinstance(family_value,(list,tuple)) else [family_value]
+    families={part.strip(' \"').upper() for value in family_values if value is not None
+              for part in re.split('[,;]',str(value)) if part.strip(' \"')}
+    family=next(iter(families)) if len(families)==1 else None
     width=next((value for key in ('outer_wall_line_width','external_perimeter_extrusion_width','line_width','extrusion_width')
                 if '%' not in str(config.get(key)) and (value:=number(config.get(key),.05,3)) is not None),None)
     width_source='GCODE_LINE_WIDTH'
@@ -42,44 +42,43 @@ def settings(analysis):
             'line_width_mm':width,'line_width_source':width_source,
             'layer_height_mm':number(config.get('layer_height') or config.get('first_layer_height'),.01,3),
             'speed_mm_s':number(speeds.get('p50_approx'),1,2000),
-            'nozzle_c':number(config.get('nozzle_temperature') or config.get('temperature'),50,600)}
+            'nozzle_c':number(first('nozzle_temperature','temperature'),50,600),
+            'bed_c':number(first('bed_temperature'),0,300),
+            'chamber_c':number(first('chamber_temperature'),0,300),
+            'fan_percent':number(first('fan_speed','fan_speed_percent'),0,100),
+            'material_family':family,
+            # A slicer profile name is not a verified manufacturer grade.
+            'material_grade':first('filament_grade','material_grade'),
+            'filament_profile':first('filament_settings_id'),
+            'moisture_condition':first('moisture_condition','filament_moisture'),
+            'annealing':first('annealing','anneal_condition'),
+            'process_context_raw':deepcopy({k:v for k,v in config.items()
+                if any(token in k.lower() for token in ('temperature','fan','moisture','anneal','grade','filament'))})}
 
 
 def material_factors(analysis):
-    """Bounded per-axis scaling of the material stress. Never rises above one."""
-    read=settings(analysis);factors={axis:1. for axis in AXES};applied=[]
-    speed=read['speed_mm_s']
-    if speed and speed>REFERENCE_SPEED_MM_S:
-        # Faster deposition shortens the time each interface spends healing.
-        plane=max(.85,1-(speed-REFERENCE_SPEED_MM_S)*.0004)
-        build=max(.70,1-(speed-REFERENCE_SPEED_MM_S)*.0010)
-        factors['X']*=plane;factors['Y']*=plane;factors['Z']*=build
-        applied.append({'variable':'DEPOSITION_SPEED','value':round(speed,1),'unit':'mm/s',
-                        'reference':REFERENCE_SPEED_MM_S,'in_plane':round(plane,4),'build_axis':round(build,4)})
-    layer=read['layer_height_mm']
-    if layer and layer>REFERENCE_LAYER_MM:
-        # Taller layers weld a smaller share of the section at each interface.
-        plane=max(.9,(REFERENCE_LAYER_MM/layer)**.12)
-        build=max(.7,(REFERENCE_LAYER_MM/layer)**.35)
-        factors['X']*=plane;factors['Y']*=plane;factors['Z']*=build
-        applied.append({'variable':'LAYER_HEIGHT','value':layer,'unit':'mm',
-                        'reference':REFERENCE_LAYER_MM,'in_plane':round(plane,4),'build_axis':round(build,4)})
-    return {'version':VERSION,'factors':{axis:round(factors[axis],6) for axis in AXES},
-            'applied':applied,'settings':read,
-            'limitations':['Speed and layer-height scaling are bounded engineering assumptions, not measured coupon corrections.',
-                           'Infill density, pattern and wall count are applied per section when a load limit is computed, not here.',
-                           'No value is ever raised above the published test-specimen strength.']}
+    """Identity factors are legacy placeholders, never equal-strength predictions."""
+    read=settings(analysis)
+    return {'version':VERSION,'status':'UNCALIBRATED_PROCESS_MODEL',
+            'factor_status':'NOT_APPLIED','is_prediction':False,
+            'factors':{axis:1. for axis in AXES},'applied':[],'settings':read,
+            'literature_comparisons':literature_comparisons(read),
+            'limitations':['No calibrated transfer from reference coupon to target process is available.',
+                           'Identity factors mean no correction applied, not unchanged physical strength.',
+                           'Literature observations are not applied to target material strength or force.',
+                           'Reference and target grade, thermal history, orientation and test conditions must be established.']}
 
 
-def process_adjustment(analysis,directional_mpa):
-    """As-printed material stress placed next to the published reference."""
+def process_adjustment(analysis,directional_mpa,*,reference_context=None):
+    """Reference data and process evidence; no effective stress without calibration."""
     if not isinstance(directional_mpa,dict):return None
-    report=material_factors(analysis);effective={}
+    report=material_factors(analysis)
     for axis in AXES:
         base=number(directional_mpa.get(axis),0,1e5)
         if base is None:return None
-        effective[axis]=str(round(base*report['factors'][axis],4))
     report['reference_mpa']={axis:str(directional_mpa.get(axis)) for axis in AXES}
-    report['effective_mpa']=effective
-    report['adjusted']=any(report['factors'][axis]<1 for axis in AXES)
+    report['effective_mpa']=None
+    report['adjusted']=False
+    report['reference_context']=deepcopy(reference_context) if isinstance(reference_context,dict) else None
+    report['target_context']=deepcopy(report['settings'])
     return report

@@ -62,6 +62,18 @@ class CapacityAudit(unittest.TestCase):
         for key in ('axial_capacity_n','bending_force_n','governing_capacity_n'):
             self.assertIsNone(result[key])
         self.assertEqual(result['governing_mode'],'LAYER_COMPARISON_ONLY')
+        self.assertIsNone(result['allowable_mpa'])
+        self.assertEqual(result['material_reference_mpa'],10.)
+        self.assertEqual(result['section_knockdown_reasons'],[])
+
+    def test_scenario_never_claims_validated_transfer_or_confidence_interval(self):
+        result=self.calculate()
+        self.assertFalse(result['empirically_validated'])
+        self.assertFalse(result['validation']['process_transfer_validated'])
+        self.assertFalse(result['validation']['source_grade_transfer_validated'])
+        self.assertIsNone(result['prediction_interval_n'])
+        self.assertEqual(result['material_reference_mpa'],10.)
+        self.assertFalse(result['section_knockdown_reasons'][0]['empirically_validated'])
 
 
 if __name__=='__main__':unittest.main()

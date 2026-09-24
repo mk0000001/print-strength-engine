@@ -3,7 +3,7 @@ from math import isfinite
 from .process import settings as process_settings
 
 GRAVITY=9.80665
-VERSION='CAPACITY_SCREENING_V2_AUDITED'
+VERSION='CAPACITY_SCENARIO_V3_EVIDENCE_SEPARATED'
 BASIS_ENVELOPE='SOLID_ENVELOPE_SECTION_TIMES_MATERIAL_REFERENCE'
 BASIS_PROXY='GCODE_MATERIAL_EXTRUSION_PROXY_AREA_TIMES_MATERIAL_REFERENCE'
 PATTERN_EFFICIENCY={'gyroid':.95,'honeycomb':.9,'tri-hexagon':.88,'cubic':.85,'adaptive':.8,'grid':.8,
@@ -35,10 +35,10 @@ def _pattern_efficiency(name):
 
 
 def capacity_for_candidate(candidate,directional_mpa,analysis=None,lever_mm=None):
-    """Axial and bending screening limits for one reconstructed section.
+    """Uncalibrated axial and bending scenarios for an envelope section.
 
     The supplied stress is multiplied by the section area and then reduced for
-    the printed structure: sparse core, wall count and thin-wall notches. It is
+    an assumed printed structure: rectangular shell and sparse core. It is
     not a measured breaking load and models no fatigue, creep or buckling.
     """
     if not isinstance(directional_mpa,dict):return None
@@ -49,6 +49,7 @@ def capacity_for_candidate(candidate,directional_mpa,analysis=None,lever_mm=None
         area=_number(candidate.get('material_area_proxy_mm2'));is_proxy=True
     allowable=_number(directional_mpa.get(axis),1e5)
     if area is None or allowable is None:return None
+    reference_stress=allowable
     read=process_settings(analysis)
     infill=read['infill_percent'];walls=read['walls'];width=read['line_width_mm']
     efficiency=1. if infill==100 else _pattern_efficiency(read['pattern'])
@@ -56,7 +57,7 @@ def capacity_for_candidate(candidate,directional_mpa,analysis=None,lever_mm=None
     knockdown=1.;reasons=[]
     structure_known=infill==100 or (infill is not None and walls is not None and width is not None and thickness is not None)
     if not is_proxy and thickness and infill is not None and walls is not None and width is not None:
-        # Walls carry the load; the sparse core follows cellular-solid scaling.
+        # Hypothetical rectangular shell/core, not measured deposited topology.
         core_width = max(0., area/thickness - 2*walls*width) if thickness else 0.
         core_thickness = max(0., thickness - 2*walls*width)
         core = core_width * core_thickness
@@ -69,18 +70,20 @@ def capacity_for_candidate(candidate,directional_mpa,analysis=None,lever_mm=None
                             'pattern_efficiency_key':_pattern_key(read['pattern']),
                             'pattern_efficiency_fallback':_pattern_key(read['pattern']) is None,
                             'pattern_efficiency_basis':'ASSUMED_PATTERN_FAMILY_NOT_CALIBRATED',
+                            'core_exponent':CORE_EXPONENT,'empirically_validated':False,
                             'factor':round(structure,4)})
     # Removed an uncalibrated notch multiplier that made additional walls weaker.
-    if is_proxy and axis=='Z' and infill is not None:
-        # A layer proxy counts loose beads that are not a connected cross-section.
-        cellular=max(.2,.4+.6*(infill/100.)**.5)
-        knockdown*=cellular
-        reasons.append({'variable':'SPARSE_LAYER_BONDING','infill_percent':infill,'factor':round(cellular,4)})
+    # Layer-volume comparisons cannot identify bonding stress: no invented
+    # density-to-weld multiplier is attached even when no force is displayed.
     allowable*=knockdown
     if is_proxy:
         # A layer proxy sums loose beads across the whole layer; it is not a connected
         # cross-section, so no force may be derived from it.
-        return {'model_version':VERSION,'is_failure_prediction':False,'section_normal_axis':axis,'allowable_mpa':allowable,'section_area_mm2':area,
+        return {'model_version':VERSION,'is_failure_prediction':False,'empirically_validated':False,
+                'calibration_status':'NOT_A_MECHANICAL_CAPACITY','calibration_source_ids':[],
+                'structure_model':'LAYER_EXTRUSION_VOLUME_PROXY',
+                'calculation_status':'GEOMETRY_COMPARISON_ONLY','material_reference_mpa':reference_stress,
+                'section_normal_axis':axis,'allowable_mpa':None,'section_area_mm2':area,
                 'axial_capacity_n':None,'axial_capacity_kgf':None,
                 'bending_capacity_nmm':None,'bending_lever_mm':None,
                 'bending_force_n':None,'bending_force_kgf':None,
@@ -98,7 +101,7 @@ def capacity_for_candidate(candidate,directional_mpa,analysis=None,lever_mm=None
     # scenario has a usable modulus. A wall-only inferred rectangle is insufficient.
     bending=modulus*allowable if modulus and infill==100 else None
     lever=_number(lever_mm)
-    # A thin section almost always meets a bending moment before a pure pull.
+    # Only the explicitly assumed moment arm defines this scenario.
     bending_force=bending/lever if bending and lever else None
     governing=min(axial,bending_force) if axial is not None and bending_force is not None else None
     mode=('AXIAL' if axial<=bending_force else 'BENDING') if governing is not None else 'INCOMPLETE_LOAD_CASE'
@@ -106,10 +109,20 @@ def capacity_for_candidate(candidate,directional_mpa,analysis=None,lever_mm=None
     limitations=['Section area is a proxy from extruded material, not a connected net cross-section.'] if is_proxy else ['Section area comes from the outer-wall envelope.']
     limitations.extend(['Interlayer bonding, stress concentrations, fatigue and creep are not solved.',
                         'Sparse axial reduction assumes a rectangular shell/core; it is not reconstructed deposited material.',
-                        'Pattern and process multipliers are uncalibrated assumptions, not experimental failure predictions.',
+                        'Pattern multipliers and the core exponent are uncalibrated scenario assumptions.',
                         'Sparse/unknown infill bending is withheld because effective section inertia is unknown.',
                         'The bending force is a hypothetical point-load scenario, not a known restraint or failure load.'])
     return {'model_version':VERSION,'is_failure_prediction':False,'structure_settings':read,
+            'calibration_status':'UNVALIDATED_ENGINEERING_ASSUMPTION','calibration_source_ids':[],
+            'structure_model':('UNKNOWN_STRUCTURE' if not structure_known else
+                               'NOMINAL_FULL_INFILL_ENVELOPE' if infill==100 else 'ASSUMED_RECTANGULAR_SHELL_CORE'),
+            'empirically_validated':False,'material_reference_mpa':reference_stress,
+            'scenario_adjusted_stress_mpa':allowable if structure_known else None,
+            'prediction_interval_n':None,
+            'validation':{'status':'NO_MATCHED_PART_FAILURE_TESTS','property':'AXIAL_TENSILE_SCENARIO',
+                          'source_grade_transfer_validated':False,'process_transfer_validated':False,
+                          'section_model_validated_against_printed_coupons':False,
+                          'uncertainty_quantified':False},
             'calculation_status':'UNCALIBRATED_SCENARIO' if structure_known else 'MISSING_STRUCTURE_SETTINGS',
             'section_normal_axis':axis,'allowable_mpa':allowable,'section_area_mm2':area,
             'axial_capacity_n':axial,'axial_capacity_kgf':axial/GRAVITY if axial is not None else None,
