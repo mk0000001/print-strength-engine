@@ -1,6 +1,6 @@
 """Finished-part thin-region screening from outer contours; not FEA or failure load."""
 import math
-VERSION='LOCAL_OUTER_ENVELOPE_V2_SECTION'
+VERSION='LOCAL_OUTER_ENVELOPE_V3_FINITE_CELL_SECTION'
 AXIS_NAMES=('Z','Y','X')
 
 
@@ -25,14 +25,14 @@ def section_metrics(solid,part,spacing,threshold_mm,axis=None):
     offsets=(cells-cells.mean(axis=0))*spacing
     modulus=None
     for column in range(offsets.shape[1]):
-        distance=float(np.abs(offsets[:,column]).max())
-        if distance<=0:continue
-        second=float((offsets[:,column]**2).sum())*spacing*spacing
+        # Each occupied voxel is a finite square, not a point mass at its center.
+        distance=float(np.abs(offsets[:,column]).max())+spacing/2
+        second=float((offsets[:,column]**2).sum())*spacing*spacing+len(cells)*spacing**4/12
         value=second/distance
         modulus=value if modulus is None else min(modulus,value)
     return {'min_section_area_mm2':round(area,4),'section_normal_axis':AXIS_NAMES[axis],
             'section_modulus_mm3':round(modulus,4) if modulus else None,
-            'section_station_mm':round(float((int(low[axis])+station+.5)*spacing),3),
+            'section_station_mm':float((int(low[axis])+station+.5)*spacing),
             'section_basis':'MIN_SOLID_VOXEL_COUNT_PERPENDICULAR_TO_PRINCIPAL_AXIS'}
 
 
@@ -86,7 +86,13 @@ def screen_solid(solid,origin_xyz,spacing_mm,*,threshold_mm=2.4,max_candidates=6
                 'reason':'THIN_FINISHED_PART_ENVELOPE','load_capacity_n':None,
                 'screening_score':float(max(span)/max(proxy,spacing))})
             section=section_metrics(solid,part,spacing,threshold_mm,axis)
-            if section:candidates[-1].update(section)
+            if section:
+                # section_metrics uses grid-relative coordinates; exported stations
+                # share the world coordinate system used by bounds and markers.
+                section['section_station_mm']=round(section['section_station_mm']+float(origin_xyz[2-axis]),3)
+                position[2-axis]=section['section_station_mm']
+                candidates[-1]['z_mm']=position[2]
+                candidates[-1].update(section)
     ordered=sorted(candidates,key=lambda c:(c['thickness_proxy_mm'],-c['screening_score'],-c['ridge_voxels']))
     chosen=[]
     for c in ordered:
