@@ -1,39 +1,75 @@
 """Finished-part thin-region screening from outer contours; not FEA or failure load."""
 import math
-VERSION='LOCAL_OUTER_ENVELOPE_V3_FINITE_CELL_SECTION'
+VERSION='LOCAL_OUTER_ENVELOPE_V4_CONNECTED_PRINCIPAL_SECTIONS'
 AXIS_NAMES=('Z','Y','X')
 
 
-def section_metrics(solid,part,spacing,threshold_mm,axis=None):
-    """Minimum net section perpendicular to the region principal axis."""
+def section_metrics(solid,part,spacing,threshold_mm,axis=None,component_labels=None):
+    """Separate area and principal-bending minima within one connected region.
+
+    Stations are grid-relative here; screen_solid exports world coordinates.
+    Principal bending is a geometric comparison, not a supplied loading case.
+    """
     import numpy as np
+    if component_labels is None:
+        from scipy import ndimage as ndi
+        component_labels,_=ndi.label(solid)  # Face-connected material, not corner contact.
+    ids=component_labels[tuple(part.T)]
+    occupied=ids[ids>0]
+    if not len(occupied):return None
+    components=np.unique(occupied)
+    if len(components)!=1:return None  # Never aggregate unrelated candidate objects.
+    component=int(components[0])
     # The load axis follows the whole connected region, never a sampling bucket.
     axis=int(np.argmax(np.ptp(part,axis=0))) if axis is None else int(axis)
     pad=int(math.ceil(threshold_mm/spacing))+1
     low=np.maximum(part.min(axis=0)-pad,0);high=np.minimum(part.max(axis=0)+pad+1,solid.shape)
-    window=solid[low[0]:high[0],low[1]:high[1],low[2]:high[2]]
+    window=component_labels[low[0]:high[0],low[1]:high[1],low[2]:high[2]]==component
     counts=window.sum(axis=tuple(i for i in range(3) if i!=axis))
     stations=np.flatnonzero(counts>0)
     if not len(stations):return None
     start=max(0,int(part.min(axis=0)[axis])-int(low[axis]));end=min(len(counts)-1,int(part.max(axis=0)[axis])-int(low[axis]))
     inside=stations[(stations>=start)&(stations<=end)]
     if not len(inside):inside=stations
-    station=int(inside[np.argmin(counts[inside])])
-    cells=np.argwhere(np.take(window,station,axis=axis))
-    if not len(cells):return None
-    area=float(len(cells))*spacing*spacing
-    offsets=(cells-cells.mean(axis=0))*spacing
-    modulus=None
-    for column in range(offsets.shape[1]):
-        # Each occupied voxel is a finite square, not a point mass at its center.
-        distance=float(np.abs(offsets[:,column]).max())+spacing/2
-        second=float((offsets[:,column]**2).sum())*spacing*spacing+len(cells)*spacing**4/12
-        value=second/distance
-        modulus=value if modulus is None else min(modulus,value)
+    station=int(inside[np.argmin(counts[inside])]);area=float(counts[station])*spacing**2
+    modulus=None;bending_station=None;bending_area=None;bending_properties=None
+    # Repeated planes are common in prismatic parts. Cache only the preceding
+    # plane, bounding memory and retaining exact station/tie ordering.
+    previous_plane=None;previous_properties=None
+    for index in inside:
+        selection=[slice(None)]*3;selection[axis]=int(index)
+        plane=window[tuple(selection)]
+        if previous_plane is not None and np.array_equal(plane,previous_plane):
+            properties=previous_properties
+        else:
+            cells=np.argwhere(plane);offsets=(cells-cells.mean(axis=0))*spacing
+            # Finite square-cell coordinate second-moment tensor, including
+            # product of inertia. Eigenvectors describe principal stress gradients.
+            tensor=offsets.T@offsets*spacing**2+np.eye(2)*len(cells)*spacing**4/12
+            moments,directions=np.linalg.eigh(tensor)
+            distances=np.max(np.abs(offsets@directions),axis=0)+spacing/2*np.sum(np.abs(directions),axis=0)
+            moduli=moments/distances;weak=int(np.argmin(moduli))
+            normal=np.zeros(3)
+            plane_axes=[i for i in range(3) if i!=axis]
+            for i,plane_axis in enumerate(plane_axes):normal[2-plane_axis]=directions[i,weak]
+            properties=(float(moduli[weak]),len(cells)*spacing**2,
+                        {'principal_second_moments_mm4':moments.tolist(),
+                         'principal_section_moduli_mm3':moduli.tolist(),
+                         'bending_coordinate_moment_tensor_mm4':tensor.tolist(),
+                         'section_plane_axes':[AXIS_NAMES[i] for i in plane_axes],
+                         'bending_stress_gradient_xyz':normal.tolist()})
+            previous_plane=plane.copy();previous_properties=properties
+        if modulus is None or properties[0]<modulus:
+            modulus,bending_area,bending_properties=properties;bending_station=int(index)
     return {'min_section_area_mm2':round(area,4),'section_normal_axis':AXIS_NAMES[axis],
             'section_modulus_mm3':round(modulus,4) if modulus else None,
             'section_station_mm':float((int(low[axis])+station+.5)*spacing),
-            'section_basis':'MIN_SOLID_VOXEL_COUNT_PERPENDICULAR_TO_PRINCIPAL_AXIS'}
+            'axial_section_station_mm':float((int(low[axis])+station+.5)*spacing),
+            'bending_section_station_mm':float((int(low[axis])+bending_station+.5)*spacing),
+            'bending_section_area_mm2':round(bending_area,4),
+            **bending_properties,
+            'section_basis':'SEPARATE_AREA_AND_PRINCIPAL_BENDING_MINIMA',
+            'section_scope':'CROPPED_FACE_CONNECTED_MATERIAL_COMPONENT'}
 
 
 def screen_solid(solid,origin_xyz,spacing_mm,*,threshold_mm=2.4,max_candidates=6):
@@ -56,7 +92,9 @@ def screen_solid(solid,origin_xyz,spacing_mm,*,threshold_mm=2.4,max_candidates=6
     del maximum
     # Only medial ridges qualify: ordinary surfaces of a thick solid are not thin sections.
     grown=ndi.binary_dilation(ridge)&solid
-    labels,count=ndi.label(grown,structure=np.ones((3,3,3),dtype=bool))
+    labels,count=ndi.label(grown)
+    # Label the full material once; candidate windows must not include neighbors.
+    material_labels=ndi.label(solid)[0] if count else None
     objects=ndi.find_objects(labels);candidates=[]
     overall_span=max(np.asarray(solid.shape)*spacing);bin_mm=max(10.,overall_span/8)
     for label,slices in enumerate(objects,1):
@@ -85,11 +123,12 @@ def screen_solid(solid,origin_xyz,spacing_mm,*,threshold_mm=2.4,max_candidates=6
                 'extent_mm':span[::-1].tolist(),'ridge_voxels':len(part),'resolution_mm':spacing,
                 'reason':'THIN_FINISHED_PART_ENVELOPE','load_capacity_n':None,
                 'screening_score':float(max(span)/max(proxy,spacing))})
-            section=section_metrics(solid,part,spacing,threshold_mm,axis)
+            section=section_metrics(solid,part,spacing,threshold_mm,axis,material_labels)
             if section:
                 # section_metrics uses grid-relative coordinates; exported stations
                 # share the world coordinate system used by bounds and markers.
-                section['section_station_mm']=round(section['section_station_mm']+float(origin_xyz[2-axis]),3)
+                for field in ('section_station_mm','axial_section_station_mm','bending_section_station_mm'):
+                    section[field]=round(section[field]+float(origin_xyz[2-axis]),3)
                 position[2-axis]=section['section_station_mm']
                 candidates[-1]['z_mm']=position[2]
                 candidates[-1].update(section)

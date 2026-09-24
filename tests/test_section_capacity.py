@@ -21,7 +21,8 @@ class SectionCapacity(unittest.TestCase):
 
     def test_capacity_uses_axis_specific_allowable_and_reports_both_units(self):
         candidate={'min_section_area_mm2':60.,'section_modulus_mm3':20.,'section_normal_axis':'Z'}
-        value=capacity_for_candidate(candidate,{'X':'35.9','Y':'35.9','Z':'14.42'})
+        value=capacity_for_candidate(candidate,{'X':'35.9','Y':'35.9','Z':'14.42'},
+                                     {'configuration':{'sparse_infill_density':100}})
         self.assertEqual(value['allowable_mpa'],14.42)
         self.assertAlmostEqual(value['axial_capacity_n'],60*14.42,places=6)
         self.assertAlmostEqual(value['axial_capacity_kgf'],60*14.42/9.80665,places=6)

@@ -28,10 +28,18 @@ def settings(analysis):
     config=analysis.get('configuration') or {}
     metrics=analysis.get('process_metrics') or {}
     speeds=metrics.get('commanded_speed_mm_s') or {}
-    return {'infill_percent':number(config.get('sparse_infill_density') or config.get('fill_density'),0,100),
+    def first(*keys):
+        return next((config[k] for k in keys if config.get(k) not in (None,'')),None)
+    width=next((value for key in ('outer_wall_line_width','external_perimeter_extrusion_width','line_width','extrusion_width')
+                if '%' not in str(config.get(key)) and (value:=number(config.get(key),.05,3)) is not None),None)
+    width_source='GCODE_LINE_WIDTH'
+    if width is None:
+        width=number(config.get('nozzle_diameter'),.05,3) or number(analysis.get('nozzle_diameter_mm'),.05,3)
+        width_source='NOZZLE_DIAMETER_ASSUMPTION' if width is not None else 'UNKNOWN'
+    return {'infill_percent':number(first('sparse_infill_density','fill_density'),0,100),
             'pattern':(str(config.get('sparse_infill_pattern') or config.get('fill_pattern') or '').strip().lower() or None),
-            'walls':number(config.get('wall_loops') or config.get('perimeters'),1,40),
-            'line_width_mm':number(config.get('nozzle_diameter'),.05,3) or number(analysis.get('nozzle_diameter_mm'),.05,3),
+            'walls':number(first('wall_loops','perimeters'),0,40),
+            'line_width_mm':width,'line_width_source':width_source,
             'layer_height_mm':number(config.get('layer_height') or config.get('first_layer_height'),.01,3),
             'speed_mm_s':number(speeds.get('p50_approx'),1,2000),
             'nozzle_c':number(config.get('nozzle_temperature') or config.get('temperature'),50,600)}
