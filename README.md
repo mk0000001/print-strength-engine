@@ -1,5 +1,10 @@
 # Print Strength Engine
 
+Release: **v0.11.0** · 11 recorded code revisions (10 updates after initial import). [Commit ledger](VERSION_HISTORY.json).
+
+Count includes reachable non-merge commits touching the engine package, including merged development history; excludes documentation-only, tests-only, host-app changes and generated _version.py. It counts commits, not individual features or validated accuracy. Version convention: 0.<code revision count>.<release metadata fix>. Past results without a recorded version remain unknown.
+
+
 Public documentation: [research evidence and sources](docs/research-evidence.md) · [system validation and limitations](docs/system-validation.md) · [process API](PROCESS_EVIDENCE.md).
 
 Current contracts are `GCODE_PROCESS_EVIDENCE_V3_THERMAL_CONTEXT` and `CAPACITY_SCENARIO_V4_GEOMETRY_QUALIFIED`. Material references, geometric screening and hypothetical load scenarios are separate outputs; none is a calibrated whole-part failure prediction.

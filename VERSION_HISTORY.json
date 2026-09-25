@@ -1,0 +1,53 @@
+{
+  "counting_rule": "Reachable non-merge commits modifying the engine package, excluding _version.py; initial import counts as revision 1. Docs, tests-only and host-app changes excluded. Not individual feature counts.",
+  "version": "0.11.0",
+  "revision_count": 11,
+  "update_count": 10,
+  "source_commit": "476e625bfa3e39c43f4c6dd4c77861ab7ad9b3f5",
+  "commits": [
+    {
+      "commit": "b8d3aeeabebb80addc05a50ca25e2ad3e000a61d",
+      "subject": "Add independent net-section screening core with explicit limits"
+    },
+    {
+      "commit": "0d1c3cd5a8e9069e8dc92118af13a5ae8e06e8f2",
+      "subject": "Add bounded layer-volume geometry screening with validated limitations"
+    },
+    {
+      "commit": "1ca69896f7607230f65b14b965b9c03641316765",
+      "subject": "Expose G-code layer number for weak-layer candidates"
+    },
+    {
+      "commit": "7c8cb3897cb03289b641bda8948e0e56c5802405",
+      "subject": "Add bounded literature-based PLA infill comparisons"
+    },
+    {
+      "commit": "f11e5f42d2e2c5e3c508914e2619a1550e438fac",
+      "subject": "Rank separated internal layer constrictions instead of terminal tips"
+    },
+    {
+      "commit": "751bb2848ba3828f9d0ea68c00543531717eb58a",
+      "subject": "Add local thin-section screening with per-point section and capacity"
+    },
+    {
+      "commit": "1759231d2842c0cc1c02388b5ac814a537cb1def",
+      "subject": "Add contour-based strength screening and cropped raster evaluation"
+    },
+    {
+      "commit": "6a2dae6e20adf33ffdc403252d527c7a8019cac5",
+      "subject": "Fix reviewed geometry and calculation regressions"
+    },
+    {
+      "commit": "69195ed8b4b6636b1e8dc8cee3fea57c7d65a39a",
+      "subject": "Audit connected sections and withhold unsupported load scenarios"
+    },
+    {
+      "commit": "ccb7ff9285b3f426aa3f3b973fe72d6e61addcff",
+      "subject": "Separate verified literature evidence from uncalibrated strength scenarios"
+    },
+    {
+      "commit": "476e625bfa3e39c43f4c6dd4c77861ab7ad9b3f5",
+      "subject": "Qualify section stress basis and preserve per-tool process context"
+    }
+  ]
+}
