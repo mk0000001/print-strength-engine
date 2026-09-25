@@ -19,3 +19,7 @@ Capacity schema `CAPACITY_SCREENING_V2_AUDITED` removes the uncalibrated wall-co
 This must not be presented as a validated whole-part strength predictor. Actual load direction, restraints, local stress concentrations, fatigue, buckling and delamination are not solved. Force estimates depend on the supplied stress and assumed lever; qualitative reports of easy breakage do not validate their numerical accuracy.
 
 Run `python -m unittest discover -s tests` after installing NumPy, SciPy and Shapely.
+
+Process evidence V3 preserves per-tool temperature/flow slots and reports no single temperature for conflicting or incomplete lists. Flow, top/bottom shells and cooling setpoints remain file settings, not observed void fraction or local thermal history. No duration-per-layer approximation is used as local return time.
+
+Capacity V4 separates nominal full infill from verified solid/contact geometry. `reference_area_basis` can be `UNKNOWN`, `GROSS_ENVELOPE`, `NET_MATERIAL` or `INTERLAYER_CONTACT`; the latter two withhold force on an outer-envelope section to prevent mixing stress denominators. Unknown reference basis retains only the existing uncalibrated scenario, never a validated prediction. This API does not reconstruct bonded area, solve cracks/notches, or calibrate a universal void/healing factor.

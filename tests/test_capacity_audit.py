@@ -56,6 +56,23 @@ class CapacityAudit(unittest.TestCase):
         self.assertAlmostEqual(result['bending_capacity_nmm'],10000/6)
         self.assertAlmostEqual(result['bending_force_n'],1000/6)
 
+    def test_full_infill_does_not_establish_contact_or_void_geometry(self):
+        result=self.calculate(100)
+        self.assertEqual(result['section_geometry_status'],'OUTER_ENVELOPE_ONLY')
+        self.assertIsNone(result['effective_load_bearing_area_mm2'])
+        self.assertIsNone(result['bonded_contact_area_mm2'])
+        self.assertFalse(result['solid_section_verified'])
+        self.assertIn('VOID_AND_CONTACT_GEOMETRY_UNKNOWN',result['assessment_gaps'])
+        self.assertIn('NOTCH_AND_CRACK_FAILURE_NOT_SOLVED',result['assessment_gaps'])
+
+    def test_contact_normalized_stress_cannot_multiply_outer_envelope(self):
+        for basis in ('INTERLAYER_CONTACT','NET_MATERIAL'):
+            result=capacity_for_candidate(self.candidate,{'Z':10.},
+                {'configuration':{'sparse_infill_density':100}},10.,reference_area_basis=basis)
+            self.assertEqual(result['calculation_status'],'INCOMPATIBLE_STRESS_AREA_BASIS')
+            for key in ('axial_capacity_n','bending_force_n','governing_capacity_n'):
+                self.assertIsNone(result[key])
+
     def test_layer_summed_extrusion_never_becomes_a_failure_load(self):
         result=capacity_for_candidate({'material_area_proxy_mm2':100.,'axis':'Z'},
                                       {'Z':10.},{'configuration':{'sparse_infill_density':100}},10.)

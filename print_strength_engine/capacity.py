@@ -3,7 +3,7 @@ from math import isfinite
 from .process import settings as process_settings
 
 GRAVITY=9.80665
-VERSION='CAPACITY_SCENARIO_V3_EVIDENCE_SEPARATED'
+VERSION='CAPACITY_SCENARIO_V4_GEOMETRY_QUALIFIED'
 BASIS_ENVELOPE='SOLID_ENVELOPE_SECTION_TIMES_MATERIAL_REFERENCE'
 BASIS_PROXY='GCODE_MATERIAL_EXTRUSION_PROXY_AREA_TIMES_MATERIAL_REFERENCE'
 PATTERN_EFFICIENCY={'gyroid':.95,'honeycomb':.9,'tri-hexagon':.88,'cubic':.85,'adaptive':.8,'grid':.8,
@@ -34,7 +34,7 @@ def _pattern_efficiency(name):
     return PATTERN_EFFICIENCY.get(_pattern_key(name),.85)
 
 
-def capacity_for_candidate(candidate,directional_mpa,analysis=None,lever_mm=None):
+def capacity_for_candidate(candidate,directional_mpa,analysis=None,lever_mm=None,*,reference_area_basis='UNKNOWN'):
     """Uncalibrated axial and bending scenarios for an envelope section.
 
     The supplied stress is multiplied by the section area and then reduced for
@@ -50,6 +50,9 @@ def capacity_for_candidate(candidate,directional_mpa,analysis=None,lever_mm=None
     allowable=_number(directional_mpa.get(axis),1e5)
     if area is None or allowable is None:return None
     reference_stress=allowable
+    if reference_area_basis not in ('UNKNOWN','GROSS_ENVELOPE','NET_MATERIAL','INTERLAYER_CONTACT'):
+        raise ValueError('INVALID_STRESS_AREA_BASIS')
+    area_basis_compatible=reference_area_basis in ('UNKNOWN','GROSS_ENVELOPE')
     read=process_settings(analysis)
     infill=read['infill_percent'];walls=read['walls'];width=read['line_width_mm']
     efficiency=1. if infill==100 else _pattern_efficiency(read['pattern'])
@@ -95,11 +98,11 @@ def capacity_for_candidate(candidate,directional_mpa,analysis=None,lever_mm=None
                 'limitations':['The area is the extruded material summed over the layer, not a connected cross-section.',
                                'Use it only to compare layers with each other; it yields no breaking force.']}
     modulus=_number(candidate.get('section_modulus_mm3'))
-    axial=area*allowable if structure_known else None
+    axial=area*allowable if structure_known and area_basis_compatible else None
     # An area fraction cannot correct bending inertia: material position matters.
     # Without deposited-road reconstruction, only a nominal full-infill envelope
     # scenario has a usable modulus. A wall-only inferred rectangle is insufficient.
-    bending=modulus*allowable if modulus and infill==100 else None
+    bending=modulus*allowable if modulus and infill==100 and area_basis_compatible else None
     lever=_number(lever_mm)
     # Only the explicitly assumed moment arm defines this scenario.
     bending_force=bending/lever if bending and lever else None
@@ -108,22 +111,33 @@ def capacity_for_candidate(candidate,directional_mpa,analysis=None,lever_mm=None
     basis=BASIS_PROXY if is_proxy else BASIS_ENVELOPE
     limitations=['Section area is a proxy from extruded material, not a connected net cross-section.'] if is_proxy else ['Section area comes from the outer-wall envelope.']
     limitations.extend(['Interlayer bonding, stress concentrations, fatigue and creep are not solved.',
+                        'Nominal 100% infill does not establish zero voids or bonded contact area.',
+                        'Coupon nominal stress is not intrinsic weld stress; no contact fraction is inferred.',
                         'Sparse axial reduction assumes a rectangular shell/core; it is not reconstructed deposited material.',
                         'Pattern multipliers and the core exponent are uncalibrated scenario assumptions.',
                         'Sparse/unknown infill bending is withheld because effective section inertia is unknown.',
                         'The bending force is a hypothetical point-load scenario, not a known restraint or failure load.'])
     return {'model_version':VERSION,'is_failure_prediction':False,'structure_settings':read,
+            'reference_stress_area_basis':reference_area_basis,
+            'section_geometry_status':'OUTER_ENVELOPE_ONLY',
+            'effective_load_bearing_area_mm2':None,'bonded_contact_area_mm2':None,
+            'solid_section_verified':False,
+            'assessment_gaps':['VOID_AND_CONTACT_GEOMETRY_UNKNOWN',
+                               'LOCAL_THERMAL_HISTORY_UNKNOWN',
+                               'NOTCH_AND_CRACK_FAILURE_NOT_SOLVED',
+                               'ACTUAL_LOAD_AND_RESTRAINTS_UNKNOWN'],
             'calibration_status':'UNVALIDATED_ENGINEERING_ASSUMPTION','calibration_source_ids':[],
             'structure_model':('UNKNOWN_STRUCTURE' if not structure_known else
                                'NOMINAL_FULL_INFILL_ENVELOPE' if infill==100 else 'ASSUMED_RECTANGULAR_SHELL_CORE'),
             'empirically_validated':False,'material_reference_mpa':reference_stress,
-            'scenario_adjusted_stress_mpa':allowable if structure_known else None,
+            'scenario_adjusted_stress_mpa':allowable if structure_known and area_basis_compatible else None,
             'prediction_interval_n':None,
             'validation':{'status':'NO_MATCHED_PART_FAILURE_TESTS','property':'AXIAL_TENSILE_SCENARIO',
                           'source_grade_transfer_validated':False,'process_transfer_validated':False,
                           'section_model_validated_against_printed_coupons':False,
                           'uncertainty_quantified':False},
-            'calculation_status':'UNCALIBRATED_SCENARIO' if structure_known else 'MISSING_STRUCTURE_SETTINGS',
+            'calculation_status':('INCOMPATIBLE_STRESS_AREA_BASIS' if not area_basis_compatible else
+                                  'UNCALIBRATED_SCENARIO' if structure_known else 'MISSING_STRUCTURE_SETTINGS'),
             'section_normal_axis':axis,'allowable_mpa':allowable,'section_area_mm2':area,
             'axial_capacity_n':axial,'axial_capacity_kgf':axial/GRAVITY if axial is not None else None,
             'bending_capacity_nmm':bending,'bending_lever_mm':lever,

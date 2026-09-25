@@ -4,7 +4,7 @@ from copy import deepcopy
 import re
 from .evidence import literature_comparisons
 
-VERSION='GCODE_PROCESS_EVIDENCE_V2'
+VERSION='GCODE_PROCESS_EVIDENCE_V3_THERMAL_CONTEXT'
 AXES=('X','Y','Z')
 
 
@@ -14,6 +14,16 @@ def number(value,low,high):
     try:value=float(str(value).split(',')[0].strip().rstrip('%'))
     except (TypeError,ValueError):return None
     return value if isfinite(value) and low<=value<=high else None
+
+
+def numeric_values(value, low, high):
+    """Preserve per-tool slots, including invalid entries; no first-tool proxy."""
+    values=value if isinstance(value,(list,tuple)) else re.split('[,;]',str(value)) if value is not None else []
+    return [number(item,low,high) for item in values]
+
+
+def uniform(values):
+    return values[0] if values and values[0] is not None and all(v==values[0] for v in values) else None
 
 
 def settings(analysis):
@@ -36,14 +46,26 @@ def settings(analysis):
     if width is None:
         width=number(config.get('nozzle_diameter'),.05,3) or number(analysis.get('nozzle_diameter_mm'),.05,3)
         width_source='NOZZLE_DIAMETER_ASSUMPTION' if width is not None else 'UNKNOWN'
+    temperatures=numeric_values(first('nozzle_temperature','temperature'),50,600)
+    bed_temperatures=numeric_values(first('bed_temperature'),0,300)
+    flows=numeric_values(first('filament_flow_ratio','extrusion_multiplier'),0,5)
     return {'infill_percent':number(first('sparse_infill_density','fill_density'),0,100),
             'pattern':(str(config.get('sparse_infill_pattern') or config.get('fill_pattern') or '').strip().lower() or None),
             'walls':number(first('wall_loops','perimeters'),0,40),
             'line_width_mm':width,'line_width_source':width_source,
             'layer_height_mm':number(config.get('layer_height') or config.get('first_layer_height'),.01,3),
             'speed_mm_s':number(speeds.get('p50_approx'),1,2000),
-            'nozzle_c':number(first('nozzle_temperature','temperature'),50,600),
-            'bed_c':number(first('bed_temperature'),0,300),
+            'nozzle_c':uniform(temperatures),'nozzle_temperatures_c':temperatures,
+            'bed_c':uniform(bed_temperatures),'bed_temperatures_c':bed_temperatures,
+            'flow_ratio':uniform(flows),'flow_ratios':flows,
+            'top_shell_layers':number(first('top_shell_layers','top_solid_layers'),0,1000),
+            'bottom_shell_layers':number(first('bottom_shell_layers','bottom_solid_layers'),0,1000),
+            'minimum_layer_time_setting_s':number(first('slow_down_layer_time','min_layer_time'),0,86400),
+            # Slicer setpoints and duration/layer count cannot establish local heat history.
+            'local_interlayer_return_time_s':None,
+            'measured_substrate_temperature_c':None,
+            'measured_void_fraction':None,
+            'measured_bonded_contact_fraction':None,
             'chamber_c':number(first('chamber_temperature'),0,300),
             'fan_percent':number(first('fan_speed','fan_speed_percent'),0,100),
             'material_family':family,

@@ -80,7 +80,8 @@ class ProcessEvidence(unittest.TestCase):
                 'nozzle_temperature': [210, 215], 'bed_temperature': [60],
                 'filament_settings_id': 'PrimaSelect PLA PRO'}})
             self.assertEqual(read['material_family'], 'PLA')
-            self.assertEqual(read['nozzle_c'], 210)
+            self.assertIsNone(read['nozzle_c'])
+            self.assertEqual(read['nozzle_temperatures_c'], [210, 215])
             self.assertEqual(read['bed_c'], 60)
             self.assertIsNone(read['material_grade'])
         self.assertIsNone(settings({'detected_materials': ['PLA', 'ABS']})['material_family'])
@@ -90,6 +91,25 @@ class ProcessEvidence(unittest.TestCase):
         self.assertIsNone(row['observed_ratio'])
         self.assertFalse(row['target_within_observed_levels'])
         self.assertEqual(row['applicability'], 'OUTSIDE_OBSERVED_LEVELS')
+
+    def test_thermal_context_does_not_invent_local_measurements(self):
+        read = settings({'duration_seconds':1000,'layer_count':100,'configuration':{
+            'nozzle_temperature':'210;220','filament_flow_ratio':[1.0,1.1],
+            'slow_down_layer_time':8,'top_shell_layers':4,'bottom_shell_layers':3}})
+        self.assertIsNone(read['nozzle_c'])
+        self.assertEqual(read['nozzle_temperatures_c'],[210,220])
+        self.assertIsNone(read['flow_ratio'])
+        self.assertEqual(read['flow_ratios'],[1.0,1.1])
+        self.assertEqual(read['minimum_layer_time_setting_s'],8)
+        self.assertIsNone(read['local_interlayer_return_time_s'])
+        self.assertIsNone(read['measured_substrate_temperature_c'])
+        self.assertIsNone(read['measured_void_fraction'])
+        self.assertEqual(read['top_shell_layers'],4)
+        self.assertEqual(read['bottom_shell_layers'],3)
+
+    def test_uniform_temperature_is_known_but_invalid_member_is_not_discarded(self):
+        self.assertEqual(settings({'configuration':{'nozzle_temperature':[210,210]}})['nozzle_c'],210)
+        self.assertIsNone(settings({'configuration':{'nozzle_temperature':[210,'unknown']}})['nozzle_c'])
 
 
 if __name__ == '__main__':
